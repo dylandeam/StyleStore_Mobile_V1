@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:provider/provider.dart';
+import 'package:share_plus/share_plus.dart';
 import '../../config/theme.dart';
 import '../../config/api_config.dart';
 import '../../config/routes.dart';
@@ -13,6 +14,7 @@ import '../../services/catalog_service.dart';
 import '../../services/offline_sync_service.dart';
 import '../../services/permission_service.dart';
 import '../../utils/reservation_slots.dart';
+import '../../utils/offline_checkout_link.dart';
 
 class ProductDetailScreen extends StatefulWidget {
   final String codigo;
@@ -357,6 +359,228 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
       }
     }
     return null;
+  }
+
+  String? get _offlineCheckoutLink =>
+      OfflineCheckoutLink.forQuantity(_selectedExistence(), _quantity);
+
+  String get _selectedVariantDescription {
+    final variant = _selectedVariant();
+    final existence = _selectedExistence();
+    final color = (variant?['color_nombre'] ?? variant?['nombre'])?.toString();
+    final size =
+        (existence?['talla_nombre'] ?? existence?['talla'])?.toString();
+    final parts = <String>[
+      if (size != null && size.trim().isNotEmpty) 'talla $size',
+      if (color != null && color.trim().isNotEmpty) 'color $color',
+    ];
+    return parts.isEmpty ? 'variante seleccionada' : parts.join(', ');
+  }
+
+  Future<void> _copyOfflineCheckoutLink() async {
+    final link = _offlineCheckoutLink;
+    if (link == null) {
+      _showOfflineLinkUnavailable();
+      return;
+    }
+    await Clipboard.setData(ClipboardData(text: link));
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+      content: Text(
+          'Enlace copiado. Ábrelo en cualquier dispositivo con internet para pagar.'),
+      backgroundColor: AppTheme.successGreen,
+    ));
+  }
+
+  Future<void> _shareOfflineCheckoutLink() async {
+    final link = _offlineCheckoutLink;
+    if (link == null) {
+      _showOfflineLinkUnavailable();
+      return;
+    }
+
+    final productName = _producto?['nombre']?.toString() ?? 'esta prenda';
+    await Share.share(
+      'Completa el pago seguro de $productName ($_selectedVariantDescription, '
+      '$_quantity ${_quantity == 1 ? 'unidad' : 'unidades'}):\n$link',
+      subject: 'Pago de $productName · StyleStore',
+    );
+  }
+
+  void _showOfflineLinkUnavailable() {
+    if (!mounted) return;
+    final message = _quantity > 5
+        ? 'La compra offline admite hasta 5 unidades por enlace. Reduce la cantidad para continuar.'
+        : 'Este detalle todavía no tiene un enlace de pago guardado. Conéctate una vez, actualiza el catálogo y vuelve a abrir la prenda.';
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(message),
+      backgroundColor: AppTheme.warningOrange,
+      duration: const Duration(seconds: 5),
+    ));
+  }
+
+  void _openOfflineCheckoutSheet() {
+    final link = _offlineCheckoutLink;
+    final unitPrice = _selectedVariantPrice ??
+        double.tryParse(_producto?['precio']?.toString() ?? '0') ??
+        0;
+    final total = unitPrice * _quantity;
+    final productName = _producto?['nombre']?.toString() ?? 'Prenda';
+
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: const Color(0xFFF9F5ED),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (sheetContext) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 14, 20, 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Center(
+                child: Container(
+                  width: 44,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFB9AD9B),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 20),
+              const Row(
+                children: [
+                  Icon(Icons.offline_bolt_rounded,
+                      color: Color(0xFFB7791F), size: 28),
+                  SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      'Compra preparada sin conexión',
+                      style: TextStyle(
+                        color: Color(0xFF14263D),
+                        fontSize: 21,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'El enlace está vinculado a tu cuenta y a la selección exacta. '
+                'Compártelo con un dispositivo que tenga internet para completar el pago con PayPal.',
+                style: TextStyle(
+                  color: Color(0xFF42536A),
+                  fontSize: 14,
+                  height: 1.45,
+                ),
+              ),
+              const SizedBox(height: 18),
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(14),
+                  boxShadow: const [
+                    BoxShadow(
+                      color: Color(0x16000000),
+                      blurRadius: 18,
+                      offset: Offset(0, 6),
+                    ),
+                  ],
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(productName,
+                        style: const TextStyle(
+                            color: Color(0xFF14263D),
+                            fontSize: 17,
+                            fontWeight: FontWeight.w800)),
+                    const SizedBox(height: 5),
+                    Text('$_selectedVariantDescription · Cantidad: $_quantity',
+                        style: const TextStyle(
+                            color: Color(0xFF42536A), fontSize: 13)),
+                    const SizedBox(height: 12),
+                    Text('Total: Bs. ${total.toStringAsFixed(2)}',
+                        style: const TextStyle(
+                            color: Color(0xFF14263D),
+                            fontSize: 20,
+                            fontWeight: FontWeight.w900)),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+              if (link == null)
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFFF2D9),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text(
+                    _quantity > 5
+                        ? 'Reduce la cantidad a 5 unidades o menos para generar un enlace.'
+                        : 'Conéctate una vez y actualiza el catálogo para guardar este enlace en el teléfono.',
+                    style: const TextStyle(
+                        color: Color(0xFF754C10),
+                        fontWeight: FontWeight.w600,
+                        height: 1.35),
+                  ),
+                ),
+              if (link == null) const SizedBox(height: 14),
+              FilledButton.icon(
+                onPressed: link == null ? null : _shareOfflineCheckoutLink,
+                icon: const Icon(Icons.share_rounded),
+                label: const Text('Compartir enlace de pago'),
+                style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xFF14263D),
+                  foregroundColor: Colors.white,
+                  disabledBackgroundColor: const Color(0xFFD9D0BF),
+                  disabledForegroundColor: const Color(0xFF6F756F),
+                  padding: const EdgeInsets.symmetric(vertical: 15),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(13)),
+                ),
+              ),
+              const SizedBox(height: 8),
+              OutlinedButton.icon(
+                onPressed: link == null ? null : _copyOfflineCheckoutLink,
+                icon: const Icon(Icons.copy_rounded),
+                label: const Text('Copiar enlace'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: const Color(0xFF14263D),
+                  side: const BorderSide(color: Color(0xFF9D7A55)),
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(13)),
+                ),
+              ),
+              const SizedBox(height: 10),
+              const Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.verified_user_outlined,
+                      size: 16, color: Color(0xFF42536A)),
+                  SizedBox(width: 6),
+                  Flexible(
+                    child: Text(
+                      'El stock y el pago se validan antes de confirmar la compra.',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(color: Color(0xFF42536A), fontSize: 12),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   void _actualizarTallasParaColor(dynamic varianteColor) {
@@ -1915,10 +2139,17 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
               Expanded(
                 child: ElevatedButton.icon(
                   onPressed: canPurchase
-                      ? () => _agregarAlCarrito(irAlCheckout: true)
+                      ? (_usingOfflineData
+                          ? _openOfflineCheckoutSheet
+                          : () => _agregarAlCarrito(irAlCheckout: true))
                       : null,
-                  icon: const Icon(Icons.flash_on, size: 18),
-                  label: const Text('Comprar Ahora'),
+                  icon: Icon(
+                      _usingOfflineData
+                          ? Icons.offline_bolt_rounded
+                          : Icons.flash_on,
+                      size: 18),
+                  label: Text(
+                      _usingOfflineData ? 'Comprar offline' : 'Comprar Ahora'),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: colors.primary,
                     foregroundColor: colors.onPrimary,
