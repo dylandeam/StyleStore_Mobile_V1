@@ -9,7 +9,7 @@ class LocalDatabaseService {
     if (_instance != null) return _instance!;
     _instance = await openDatabase(
       path.join(await getDatabasesPath(), 'stylestore_offline.db'),
-      version: 2,
+      version: 3,
       onConfigure: (db) => db.execute('PRAGMA foreign_keys = ON'),
       onCreate: (db, _) async {
         await db.execute(
@@ -31,10 +31,14 @@ class LocalDatabaseService {
         await db.execute(
             'CREATE INDEX ix_sync_queue_scope_status ON sync_queue(scope, status)');
         await _createOfflineCartTables(db);
+        await _createEntitySnapshotTable(db);
       },
       onUpgrade: (db, oldVersion, newVersion) async {
         if (oldVersion < 2) {
           await _createOfflineCartTables(db);
+        }
+        if (oldVersion < 3) {
+          await _createEntitySnapshotTable(db);
         }
       },
     );
@@ -46,6 +50,35 @@ class LocalDatabaseService {
         'CREATE TABLE IF NOT EXISTS cart_snapshots (scope TEXT PRIMARY KEY, payload TEXT NOT NULL, synced_at TEXT NOT NULL)');
     await db.execute(
         'CREATE TABLE IF NOT EXISTS local_cart_additions (scope TEXT NOT NULL, stock_id INTEGER NOT NULL, payload TEXT NOT NULL, quantity INTEGER NOT NULL, created_at TEXT NOT NULL, PRIMARY KEY(scope, stock_id))');
+  }
+
+  static Future<void> _createEntitySnapshotTable(DatabaseExecutor db) async {
+    await db.execute(
+        'CREATE TABLE IF NOT EXISTS entity_snapshots (scope TEXT NOT NULL, entity_key TEXT NOT NULL, payload TEXT NOT NULL, synced_at TEXT NOT NULL, PRIMARY KEY(scope, entity_key))');
+  }
+
+  Future<void> saveEntitySnapshot(
+      String scope, String entityKey, Object payload) async {
+    await (await database).insert(
+      'entity_snapshots',
+      {
+        'scope': scope,
+        'entity_key': entityKey,
+        'payload': jsonEncode(payload),
+        'synced_at': DateTime.now().toUtc().toIso8601String(),
+      },
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  }
+
+  Future<dynamic> loadEntitySnapshot(String scope, String entityKey) async {
+    final rows = await (await database).query(
+      'entity_snapshots',
+      where: 'scope = ? AND entity_key = ?',
+      whereArgs: [scope, entityKey],
+      limit: 1,
+    );
+    return rows.isEmpty ? null : jsonDecode(rows.first['payload'] as String);
   }
 
   Future<void> close() async {
@@ -422,6 +455,8 @@ class LocalDatabaseService {
           .delete('local_clients', where: 'scope = ?', whereArgs: [scope]);
       affected += await txn
           .delete('cart_snapshots', where: 'scope = ?', whereArgs: [scope]);
+      affected += await txn
+          .delete('entity_snapshots', where: 'scope = ?', whereArgs: [scope]);
     });
     return affected;
   }
@@ -565,6 +600,8 @@ class LocalDatabaseService {
       await txn.delete('local_clients', where: 'scope = ?', whereArgs: [scope]);
       await txn
           .delete('cart_snapshots', where: 'scope = ?', whereArgs: [scope]);
+      await txn
+          .delete('entity_snapshots', where: 'scope = ?', whereArgs: [scope]);
       await txn.delete('local_cart_additions',
           where: 'scope = ?', whereArgs: [scope]);
 

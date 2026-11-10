@@ -60,12 +60,30 @@ class CatalogService extends ChangeNotifier {
         _sucursales = data.map((e) => e as Map<String, dynamic>).toList();
         await _localDatabase.saveBranches(
             await _storage.getOfflineScope(), data);
+        unawaited(_prefetchAllCatalogs(data));
         notifyListeners();
       }
     } catch (_) {
       _sucursales =
           await _localDatabase.loadBranches(await _storage.getOfflineScope());
       notifyListeners();
+    }
+  }
+
+  Future<void> _prefetchAllCatalogs(List<dynamic> branches) async {
+    final scope = await _storage.getOfflineScope();
+    final branchIds = <int?>[null, ...branches.map((item) => (item as Map)['id'] as int?)];
+    for (final branchId in branchIds) {
+      try {
+        final suffix = branchId == null ? '' : '?sucursal_id=$branchId';
+        final response = await _apiService.get('${ApiConfig.catalogoUrl}$suffix');
+        if (response.statusCode != 200) continue;
+        final data = jsonDecode(utf8.decode(response.bodyBytes)) as List<dynamic>;
+        await _localDatabase.saveCatalog(scope, branchId, data);
+        await _cacheProductImages(data);
+      } catch (_) {
+        // El precargado continúa con las demás sucursales si una falla.
+      }
     }
   }
 

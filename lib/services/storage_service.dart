@@ -40,6 +40,7 @@ class StorageService {
   static const String _keyPushRegistration = 'stylestore_push_registration';
   static const String _keyTenantPortal = 'stylestore_tenant_portal';
   static const String _keyPermissions = 'stylestore_effective_permissions';
+  static const String _keyUserProfile = 'stylestore_user_profile';
 
   Future<void> saveTokens({
     required String accessToken,
@@ -94,6 +95,21 @@ class StorageService {
 
   Future<void> clearEffectivePermissions() =>
       _storage.delete(key: _keyPermissions);
+
+  Future<void> saveUserProfile(Map<String, dynamic> profile) =>
+      _storage.write(key: _keyUserProfile, value: jsonEncode(profile));
+
+  Future<Map<String, dynamic>?> getUserProfile() async {
+    final raw = await _readSafely(_keyUserProfile);
+    if (raw == null || raw.isEmpty) return null;
+    try {
+      return Map<String, dynamic>.from(jsonDecode(raw) as Map);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> clearUserProfile() => _storage.delete(key: _keyUserProfile);
 
   Future<String?> _readSafely(String key) async {
     try {

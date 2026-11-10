@@ -369,4 +369,21 @@ void main() {
     expect(await reopened.loadLocalCartAdditions(scope), isEmpty);
     await reopened.close();
   });
+
+  test('snapshots de reservas sobreviven el cierre normal de la app', () async {
+    const scope = 'empresa-2:usuario-88';
+    final first = LocalDatabaseService();
+    await first.saveEntitySnapshot(scope, 'reservations', [
+      {'id': 91, 'codigo': 'RES-91', 'estado': 'pendiente'}
+    ]);
+    await first.close();
+
+    final reopened = LocalDatabaseService();
+    final cached = await reopened.loadEntitySnapshot(scope, 'reservations');
+    expect(cached, isA<List<dynamic>>());
+    expect((cached as List).single['codigo'], 'RES-91');
+    expect(await reopened.loadEntitySnapshot(
+        'empresa-otro:usuario-88', 'reservations'), isNull);
+    await reopened.close();
+  });
 }

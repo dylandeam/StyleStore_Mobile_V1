@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:connectivity_plus/connectivity_plus.dart';
-import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart';
 import 'package:uuid/uuid.dart';
 import '../config/api_config.dart';
 import 'api_service.dart';
@@ -22,16 +22,18 @@ class OfflineSubmitResult {
       required this.message});
 }
 
-class OfflineSyncService extends ChangeNotifier {
+class OfflineSyncService extends ChangeNotifier with WidgetsBindingObserver {
   final ApiService _api;
   final LocalDatabaseService _database;
   final StorageService _storage;
   StreamSubscription<List<ConnectivityResult>>? _connectivitySubscription;
+  Timer? _periodicSync;
   bool _syncing = false;
   int _pendingCount = 0;
   bool _isOnline = true;
 
   OfflineSyncService(this._api, this._database, this._storage) {
+    WidgetsBinding.instance.addObserver(this);
     Connectivity().checkConnectivity().then((results) {
       _isOnline = !results.contains(ConnectivityResult.none);
       notifyListeners();
@@ -44,6 +46,16 @@ class OfflineSyncService extends ChangeNotifier {
       if (_isOnline) _scheduleSync();
     });
     unawaited(refreshPendingCount());
+    _periodicSync = Timer.periodic(const Duration(seconds: 20), (_) {
+      if (_isOnline) unawaited(syncPending());
+    });
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && _isOnline) {
+      unawaited(syncPending());
+    }
   }
 
   int get pendingCount => _pendingCount;
@@ -308,6 +320,8 @@ class OfflineSyncService extends ChangeNotifier {
   @override
   void dispose() {
     _connectivitySubscription?.cancel();
+    _periodicSync?.cancel();
+    WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
 }

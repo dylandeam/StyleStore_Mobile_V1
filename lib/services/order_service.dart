@@ -4,9 +4,13 @@ import '../config/api_config.dart';
 import '../models/order.dart';
 import '../models/reserva.dart';
 import 'api_service.dart';
+import 'local_database_service.dart';
+import 'storage_service.dart';
 
 class OrderService extends ChangeNotifier {
   final ApiService _apiService;
+  final LocalDatabaseService _localDatabase;
+  final StorageService _storage;
   List<OrderItem> _orders = [];
   List<ReservaItem> _reservas = [];
   bool _isLoading = false;
@@ -14,7 +18,7 @@ class OrderService extends ChangeNotifier {
   int _plazoCambiosDias = 7;
   double _saldoFavor = 0;
 
-  OrderService(this._apiService);
+  OrderService(this._apiService, this._localDatabase, this._storage);
 
   List<OrderItem> get orders => _orders;
   List<ReservaItem> get reservas => _reservas;
@@ -54,13 +58,42 @@ class OrderService extends ChangeNotifier {
       if (res.statusCode == 200) {
         final List<dynamic> list = jsonDecode(res.body);
         _orders = list.map((j) => OrderItem.fromJson(j)).toList();
+        await _localDatabase.saveEntitySnapshot(
+            await _storage.getOfflineScope(), 'orders', list);
       }
       await _fetchExchangePolicyAndBalance();
     } catch (e) {
-      _errorMessage = 'Error al cargar historial de pedidos.';
+      final cached = await _localDatabase.loadEntitySnapshot(
+          await _storage.getOfflineScope(), 'orders');
+      if (cached is List) {
+        _orders = cached.map((j) => OrderItem.fromJson(j)).toList();
+      } else {
+        _errorMessage = 'Error al cargar historial de pedidos.';
+      }
     } finally {
       _isLoading = false;
       notifyListeners();
+    }
+  }
+
+  Future<void> _mergeQueuedReservations() async {
+    final scope = await _storage.getOfflineScope();
+    final operations = await _localDatabase.allOperations(scope);
+    final queued = operations.where((item) =>
+        item['operation_type'] == 'reserva' &&
+        ['pendiente', 'sincronizando'].contains(item['status']));
+    for (final operation in queued) {
+      final payload = jsonDecode(operation['payload'] as String) as Map<String, dynamic>;
+      final uuid = operation['operation_uuid'].toString();
+      if (_reservas.any((item) => item.codigo == 'OFF-${uuid.substring(0, 8)}')) continue;
+      _reservas.insert(0, ReservaItem(
+        id: -uuid.hashCode.abs(),
+        codigo: 'OFF-${uuid.substring(0, 8)}',
+        fechaLimite: DateTime.tryParse(payload['fecha_limite']?.toString() ?? '') ?? DateTime.now(),
+        estado: 'pendiente_sincronizacion',
+        totalEstimado: 0,
+        sucursalNombre: 'Sucursal #${payload['sucursal_id']}',
+      ));
     }
   }
 
@@ -88,14 +121,23 @@ class OrderService extends ChangeNotifier {
 
     try {
       final res =
-          await _apiService.get(ApiConfig.reservasUrl, requireAuth: true);
+          await _apiService.get(ApiConfig.misReservasUrl, requireAuth: true);
       if (res.statusCode == 200) {
         final List<dynamic> list = jsonDecode(res.body);
         _reservas = list.map((j) => ReservaItem.fromJson(j)).toList();
+        await _localDatabase.saveEntitySnapshot(
+            await _storage.getOfflineScope(), 'reservations', list);
       }
     } catch (e) {
-      _errorMessage = 'Error al cargar reservas.';
+      final cached = await _localDatabase.loadEntitySnapshot(
+          await _storage.getOfflineScope(), 'reservations');
+      if (cached is List) {
+        _reservas = cached.map((j) => ReservaItem.fromJson(j)).toList();
+      } else {
+        _errorMessage = 'Error al cargar reservas.';
+      }
     } finally {
+      await _mergeQueuedReservations();
       _isLoading = false;
       notifyListeners();
     }

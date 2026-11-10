@@ -79,4 +79,23 @@ void main() {
     await service.clearTenantPortal();
     expect(await service.getTenantPortal(), isNull);
   });
+
+  test('conserva el perfil autenticado para restaurarlo sin conexión', () async {
+    final memory = MemorySecureStorage();
+    final service = StorageService(storage: memory);
+    final profile = {
+      'id': 7,
+      'empresa_id': 3,
+      'email': 'cliente@tenant.test',
+      'name': 'Cliente real',
+      'role': 'cliente',
+      'is_active': true,
+      'created_at': '2026-11-10T00:00:00Z',
+    };
+
+    await service.saveUserProfile(profile);
+    expect((await service.getUserProfile())?['name'], 'Cliente real');
+    await service.clearUserProfile();
+    expect(await service.getUserProfile(), isNull);
+  });
 }

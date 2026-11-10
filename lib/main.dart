@@ -67,7 +67,7 @@ class StyleStoreApp extends StatelessWidget {
           create: (_) => CartService(apiService, localDatabase, storageService),
         ),
         ChangeNotifierProvider<OrderService>(
-          create: (_) => OrderService(apiService),
+          create: (_) => OrderService(apiService, localDatabase, storageService),
         ),
       ],
       child: Consumer3<AuthService, TenantPortalService, PermissionService>(

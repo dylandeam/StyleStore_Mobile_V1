@@ -37,6 +37,11 @@ class AuthService extends ChangeNotifier {
       return;
     }
 
+    final cachedProfile = await _storageService.getUserProfile();
+    if (cachedProfile != null) {
+      _currentUser = User.fromJson(cachedProfile);
+    }
+
     _status = AuthStatus.authenticated;
     notifyListeners();
 
@@ -217,6 +222,7 @@ class AuthService extends ChangeNotifier {
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
         _currentUser = User.fromJson(data);
+        await _storageService.saveUserProfile(_currentUser!.toJson());
         _status = AuthStatus.authenticated;
       } else {
         // Keep session active even if profile fetch has a temporary issue
@@ -231,6 +237,7 @@ class AuthService extends ChangeNotifier {
 
   void updateCurrentUser(User user) {
     _currentUser = user;
+    _storageService.saveUserProfile(user.toJson());
     notifyListeners();
   }
 
@@ -243,6 +250,7 @@ class AuthService extends ChangeNotifier {
     }
 
     await _storageService.clearTokens();
+    await _storageService.clearUserProfile();
     _currentUser = null;
     _status = AuthStatus.unauthenticated;
     notifyListeners();
